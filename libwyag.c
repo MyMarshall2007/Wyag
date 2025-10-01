@@ -15,7 +15,6 @@
 #include <regex.h>       
 #include <stdbool.h>
 
-#define SEPARATOR '/'
 #define PERMISSION 0755
 #define INIT "init"
 
@@ -24,14 +23,36 @@ char *join_path_d(char* parent, char* child)
     char *result;
     size_t len_parent = strlen(parent);
     size_t len_child = strlen(child);
-    size_t len_buff = len_parent + len_child; 
+    size_t total_len = len_child + len_parent + 1;
+    bool need_separator = false;
 
-    result = malloc(len_buff); 
-    strcpy(result, parent);
-    result[len_parent] = SEPARATOR;
-    strcpy(result + len_parent + 1, child);
+    if (len_parent > 0 && parent[len_parent-1] != '/') {
+        need_separator = true;
+        total_len++;
+    }
+        
+    result = (char *)malloc(total_len);
+    if (!result) {
+        perror("Allocation error.");
+        return NULL;
+    }
 
+    char *current = result; 
+    memcpy(current, parent, len_parent);
+    current += len_parent;
+
+    if (need_separator == true) {
+        *current = '/';
+        current++;
+    }
+
+    memcpy(current, child, len_child + 1);
     return result;
+
+
+    // Don't ever do dynamic allocation in a condition, it will 
+    // trigger a "Conditional jump or move depends on uninitialized values" 
+    // and boy that shit nasty.
 }
 
 void write_config(char *path, char *key, char **values, int len)
@@ -76,17 +97,21 @@ char *create_repository(char *path)
 {
     struct stat st = {0};
     char *gitdir = NULL;
+    char *cwd = NULL;
 
     if (strcmp(path, ".") == 0) {
-        char cwd[_PC_PATH_MAX];
-        getcwd(cwd, sizeof(cwd));
+        cwd = getcwd(NULL, 0);
         gitdir = join_path_d(cwd, ".git/");
-    }
-
-    if (stat(path, &st) == -1)  {
-        perror("The directory does not exist.");
+        free(cwd);
     } else {
-        gitdir = join_path_d(path, "./git");
+        if (stat(path, &st) == -1) {
+            perror("The directory does not exist.");
+            return NULL;
+        }    
+        else {
+            gitdir = join_path_d(path, ".git/");
+            printf("%s\n", gitdir);
+        }
     }
 
     char *objectsdir = join_path_d(gitdir, "objects/");
@@ -142,29 +167,67 @@ char *create_repository(char *path)
     return gitdir;
 }
 
-
-
-char *repo_find(char *relative_cwd) 
+char *parent_wd_d(char *path) 
 {
+    struct stat st = {0};
+    char *result = NULL;
+    if (stat(path, &st) == -1) {
+        perror("Invalid path directory.");
+        return NULL;
+    }
+
+    size_t len_path = strlen(path) - 2;
+    while (len_path >= 0) {
+        if (path[len_path] == '/') 
+            break;
+        len_path--;
+    }
+
+    if (len_path < 2)
+        return "/";
+    
+    result = (char *)malloc(len_path + 2);
+    memcpy(result, path, len_path + 1);
+    result[len_path+1] = '\0';
+
+    return result;
+}
+
+
+char *repo_find_f(char *relative_cwd) 
+{
+    DIR *d;
+    struct dirent *dir;
     struct stat st = {0};
     char *cwd = NULL;
 
-    if (strcmp(relative_cwd, ".") == 0) {
-        cwd = malloc(_PC_PATH_MAX);
-        getcwd(cwd, sizeof(cwd));
-    } else 
-        cwd = relative_cwd;
-
-    if (stat("./.git/", &st) == 0) {
-        return join_path_d(cwd, ".git/");
+    if (stat(relative_cwd, &st) == -1) {
+        perror("It is not a valid directory.");
+        return NULL;
     }
 
-    char *parent = join_path_d(cwd, "../");
-    if (strcmp(cwd, parent) == 0) {
-        perror("No root git repository.");
+    if (strcmp(relative_cwd, "/") == 0) {
+        perror("Didn't find the git repository.");
+        return NULL;
+    }
+        
+    d = opendir(relative_cwd);
+    if (d) {
+        while ((dir = readdir(d)) != NULL) {
+            if (strcmp(dir->d_name, ".git") == 0) {
+                closedir(d);
+                cwd = join_path_d(relative_cwd, ".git/");
+                free(relative_cwd);
+                return cwd;
+            }
+        }
+        closedir(d);
     }
 
-    return repo_find(parent);
+    cwd = parent_wd_d(relative_cwd);
+    free(relative_cwd);
+
+    return repo_find_f(cwd);
 }
 
 int main(int argc, char *argv[])
