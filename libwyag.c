@@ -17,6 +17,7 @@
 
 #define PERMISSION 0755
 #define INIT "init"
+#define SHA_LENGTH 40 
 
 char *join_path_d(char* parent, char* child) 
 {
@@ -229,6 +230,82 @@ char *repo_find_f(char *relative_cwd)
 
     return repo_find_f(cwd);
 }
+
+char *object_join_path_d(char *path, char *sha)
+{
+    struct stat st = {0};
+    if  (stat(path, &st) == -1) {
+        perror("Not a valid path to a directory.");
+        return NULL;
+    }
+
+    size_t len_head_sha = 3;
+    char *head_sha = malloc(len_head_sha);
+    if (!head_sha) {
+        perror("Allocation error in objec_read_d.");
+        return NULL;
+    }
+    memcpy(head_sha, sha, 2);
+    head_sha[2] = '\0';
+
+    char *part_one_path = join_path_d(path, head_sha);
+    char *rest_path_obj = sha + len_head_sha - 1;
+    char *full_path_obj = join_path_d(part_one_path, rest_path_obj);
+
+    free(head_sha);
+    free(part_one_path);
+
+    return full_path_obj;
+}
+
+int decompress_one_file(char *infilename, char *outfilename)
+{
+    gzFile infile = gzopen(infilename, "rb");
+    FILE *outfile = fopen(outfilename, "wb");
+    if (!infile || !outfile) return -1;
+
+    char buffer[128];
+    int num_read = 0, total_read = 0;
+    while ((num_read = gzread(infile, buffer, sizeof(buffer))) > 0) {
+        total_read += num_read;
+        fwrite(buffer, 1, num_read, outfile);
+    }
+
+    gzclose(infile);
+    fclose(outfile);
+    return total_read;
+}
+
+int compress_one_file(char *infilename, char *outfilename)
+{
+    FILE *infile = fopen(infilename, "rb");
+    gzFile outfile = gzopen(outfilename, "wb");
+    if (!infile || !outfile) return -1;
+
+    char inbuffer[128];
+    int num_read = 0;
+    unsigned long total_read = 0;
+    while ((num_read = fread(inbuffer, 1, sizeof(inbuffer), infile)) > 0) {
+        total_read += num_read;
+        gzwrite(outfile, inbuffer, num_read);
+    }
+
+    fclose(infile);
+    gzclose(outfile);
+    return total_read;
+}
+
+char *object_read_d(char *path, char *sha)
+{
+    struct stat st = {0};
+    if (stat(path, &st) == -1) {
+        perror("Not a valid path to a directory.");
+        return NULL;
+    }
+    
+}
+
+
 
 int main(int argc, char *argv[])
 {
