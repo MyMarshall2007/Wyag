@@ -14,10 +14,20 @@
 #include <dirent.h>
 #include <regex.h>       
 #include <stdbool.h>
+#include <assert.h>
 
 #define PERMISSION 0755
 #define INIT "init"
-#define SHA_LENGTH 40 
+#define SHA_LENGTH 41 
+#define COMPRESSED_CHUNK 128
+#define DECOMPRESSED_CHUNK 1024
+
+enum OBJECT_FORMAT { COMMIT = 0, TREE = 1, TAG = 2, BLOB = 3, NO_FORMAT = -1 };
+typedef struct Object {
+    char sha[SHA_LENGTH];
+    enum OBJECT_FORMAT format;
+    size_t size;
+} Object;
 
 char *join_path_d(char* parent, char* child) 
 {
@@ -258,54 +268,117 @@ char *object_join_path_d(char *path, char *sha)
     return full_path_obj;
 }
 
-int decompress_one_file(char *infilename, char *outfilename)
-{
-    gzFile infile = gzopen(infilename, "rb");
-    FILE *outfile = fopen(outfilename, "wb");
-    if (!infile || !outfile) return -1;
+unsigned char *read_uncompressed_d(FILE *source) {
+    z_stream strm;
+    int ret;
+    unsigned char in[COMPRESSED_CHUNK];
+    unsigned char out[DECOMPRESSED_CHUNK];
 
-    char buffer[128];
-    int num_read = 0, total_read = 0;
-    while ((num_read = gzread(infile, buffer, sizeof(buffer))) > 0) {
-        total_read += num_read;
-        fwrite(buffer, 1, num_read, outfile);
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    ret = inflateInit(&strm);
+    if (ret != Z_OK) return NULL;
+
+    strm.avail_in = fread(in, 1, COMPRESSED_CHUNK, source);
+    if (ferror(source)) {
+        (void)inflateEnd(&strm);
+        return NULL;
+    }
+    if (strm.avail_in == 0) return NULL;
+    strm.next_in = in;
+
+    strm.avail_out = DECOMPRESSED_CHUNK;
+    strm.next_out = out;
+    ret = inflate(&strm, Z_NO_FLUSH);
+    assert(ret != Z_STREAM_ERROR);
+    switch (ret) {
+        case Z_NEED_DICT:
+        case Z_DATA_ERROR:
+        case Z_MEM_ERROR:
+            (void)inflateEnd(&strm);
+            return NULL;
     }
 
-    gzclose(infile);
-    fclose(outfile);
-    return total_read;
+    (void)inflateEnd(&strm);
+    unsigned char *buff = (unsigned char *)malloc(DECOMPRESSED_CHUNK);
+    memcpy(buff, out, DECOMPRESSED_CHUNK);
+
+    return buff;
 }
 
-int compress_one_file(char *infilename, char *outfilename)
-{
-    FILE *infile = fopen(infilename, "rb");
-    gzFile outfile = gzopen(outfilename, "wb");
-    if (!infile || !outfile) return -1;
-
-    char inbuffer[128];
-    int num_read = 0;
-    unsigned long total_read = 0;
-    while ((num_read = fread(inbuffer, 1, sizeof(inbuffer), infile)) > 0) {
-        total_read += num_read;
-        gzwrite(outfile, inbuffer, num_read);
-    }
-
-    fclose(infile);
-    gzclose(outfile);
-    return total_read;
-}
-
-char *object_read_d(char *path, char *sha)
+Object *object_read_d(char *repo, char *sha)
 {
     struct stat st = {0};
-    if (stat(path, &st) == -1) {
+    char *path = NULL;
+    if (stat(repo, &st) == -1) {
         perror("Not a valid path to a directory.");
         return NULL;
     }
+
+    path = object_join_path_d(repo, sha);
+    FILE *git_obj = fopen(path, "rb");
+    free(path);
+    if (!git_obj) {
+        perror("Error when opening file.");
+        return NULL;
+    }
+
+    unsigned char *buffer = read_uncompressed_d(git_obj);
+    fclose(git_obj);
+    if (buffer == NULL) {
+        perror("Error when decompressing file.");
+        return NULL;
+    }
+
+    int end = 0;
+    for (; end < DECOMPRESSED_CHUNK; end++) {
+        if (buffer[end] == '\0')
+            break;
+    }
+    if (end == DECOMPRESSED_CHUNK -1) {
+        perror("Couldn't find the header of object.");
+        free(buffer);
+        return NULL;
+    }
+
+    char header[end+1];
+    memcpy(header, (char *)buffer, end);
+    free(buffer);
+    header[end] = '\0';
+
+    char *obj_frmt = strtok(header, " ");
+    char *size_str = header + strlen(obj_frmt) + 1;
+
+    enum OBJECT_FORMAT format = NO_FORMAT;
+    char *frmt_arr[] = {"commit", "tree", "blob"};
+    int i;
+    for (i = 0; i < 3; i++) {
+        if (strcmp(frmt_arr[i], obj_frmt) == 0) {
+            format = i;
+            break;
+        }
+    }
+
+    size_t size = (size_t)atoi(size_str);
+    if (size == 0) {
+        perror("Empyt file.");
+        return NULL;
+    }
+
+    Object *obj = malloc(sizeof(Object));
+    if (!obj) {
+        perror("Object allocation error.");
+        return NULL;
+    }
+
+    memcpy(obj->sha, sha, SHA_LENGTH);
+    obj->format = format;
+    obj->size = size;
     
+    return obj;
 }
-
-
 
 int main(int argc, char *argv[])
 {
