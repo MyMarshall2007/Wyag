@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #define PERMISSION 0755
 #define INIT "init"
-#define SHA_LENGTH 21
+#define SHA_LENGTH 41
 #define COMPRESSED_CHUNK 128
 #define CHUNK 1024
 #define SHA_CHUNK 8192 // 8KB

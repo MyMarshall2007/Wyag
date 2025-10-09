@@ -10,6 +10,33 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
+char *parent_wd_d(char *path) 
+{
+    struct stat st = {0};
+    char *result = NULL;
+    if (stat(path, &st) == -1) {
+        perror("Invalid path directory.");
+        return NULL;
+    }
+
+    size_t len_path = strlen(path) - 2;
+    while (len_path >= 0) {
+        if (path[len_path] == '/') 
+            break;
+        len_path--;
+    }
+
+    if (len_path < 2)
+        return "/";
+    
+    result = (char *)malloc(len_path + 2);
+    memcpy(result, path, len_path + 1);
+    result[len_path+1] = '\0';
+
+    return result;
+}
+
+
 char *repo_find_f(char *relative_cwd) 
 {
     DIR *d;

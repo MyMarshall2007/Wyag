@@ -114,6 +114,7 @@ char *create_repository(char *path)
 
     char *headsdir = join_path_d(refsdir, "heads/");
     char *tagsdir = join_path_d(refsdir, "tags/");
+    char *tmpdir = join_path_d(objectsdir, "tmp/");
 
     if (stat(gitdir, &st) == 0) {
         if (check_config(configfile) == true) 
@@ -124,9 +125,11 @@ char *create_repository(char *path)
         mkdir(gitdir, PERMISSION);
         mkdir(branchesdir, PERMISSION);
         mkdir(refsdir, PERMISSION);
+        mkdir(objectsdir, PERMISSION);
 
         mkdir(headsdir, PERMISSION);
         mkdir(tagsdir, PERMISSION);
+        mkdir(tmpdir, PERMISSION);
 
         char *key = "core";
         char *values[3] = {
@@ -153,32 +156,7 @@ char *create_repository(char *path)
     free(configfile);
     free(descriptionfile);
     free(HEADfile);
+    free(tmpdir);
 
     return gitdir;
-}
-
-char *parent_wd_d(char *path) 
-{
-    struct stat st = {0};
-    char *result = NULL;
-    if (stat(path, &st) == -1) {
-        perror("Invalid path directory.");
-        return NULL;
-    }
-
-    size_t len_path = strlen(path) - 2;
-    while (len_path >= 0) {
-        if (path[len_path] == '/') 
-            break;
-        len_path--;
-    }
-
-    if (len_path < 2)
-        return "/";
-    
-    result = (char *)malloc(len_path + 2);
-    memcpy(result, path, len_path + 1);
-    result[len_path+1] = '\0';
-
-    return result;
 }

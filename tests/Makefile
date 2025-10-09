@@ -30,14 +30,14 @@ $(BIN)/wyag: $(INIT_OBJ) $(CAT_OBJ) $(MAIN_OBJ) | $(BIN)
 
 # Compile main.c to object in build dir
 $(MAIN_OBJ): $(SRC_SRC)/main.c | $(BUILD)
-	gcc -c $(SRC)/test_one.c -o $@
+	gcc -c $(SRC)/test_one.c -o $@ -g
 
 # Build objects 
 $(INIT_OBJ): $(SRC_SRC)/init.c | $(BUILD)
-	gcc -c $(SRC_SRC)/init.c -o $(INIT_OBJ)
+	gcc -c $(SRC_SRC)/init.c -o $(INIT_OBJ) -g
 
 $(CAT_OBJ): $(SRC_SRC)/cat_file.c | $(BUILD)
-	gcc -c $(SRC_SRC)/cat_file.c -o $(CAT_OBJ)
+	gcc -c $(SRC_SRC)/cat_file.c -o $(CAT_OBJ) -g
 
 # Directories creation
 $(BUILD):
