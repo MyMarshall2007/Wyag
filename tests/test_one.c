@@ -1,27 +1,17 @@
-#include "../include/main.h"
-#include "../include/init.h"
-#include "../include/cat_file.h"
-#include "../include/hash_object.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <zlib.h>
-#include <assert.h>
-#include <string.h>
-#include <stdbool.h>
-#include <sys/stat.h>
-#include <dirent.h>
-#include <openssl/sha.h>
-#include <openssl/evp.h>
+#include "../src/toolkit.c"
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <zlib.h>
+// #include <assert.h>
+// #include <string.h>
+// #include <stdbool.h>
+// #include <sys/stat.h>
+// #include <dirent.h>
+// #include <openssl/sha.h>
+// #include <openssl/evp.h>
 
-size_t write_compressed(char *path_obj_sha, char *path_tmp_file)
+size_t write_compressed(FILE *dest, FILE *source)
 {
-    FILE *source = fopen(path_tmp_file, "rb");
-    FILE *dest = fopen(path_obj_sha, "rb");
-    if (source == NULL || dest == NULL) {
-        perror("Error when opening file in write_compress.");
-        return 1;
-    }
-
     int ret, flush;
     unsigned have;
     unsigned char in[CHUNK];
@@ -170,7 +160,7 @@ unsigned char *get_sha_encryption_file_d(char *path_obj)
     return sha_obj;
 }
 
-unsigned char *get_header_blob(char *path_obj) 
+static unsigned char *get_header_blob_d(char *path_obj) 
 {
     size_t size = file_size(path_obj);
     unsigned char *size_str = itos_d(size);
@@ -195,6 +185,7 @@ unsigned char *get_header_blob(char *path_obj)
     memcpy(current, size_str, size_len);
     current += size_len;
     *current = '\0';
+    free(size_str);
     if (current - header == size_header) {
         perror("Error in the header.");
         return NULL;
@@ -202,15 +193,15 @@ unsigned char *get_header_blob(char *path_obj)
     return header;
 }
 
-int copy_tmp_file_blob(unsigned char *header, char *path_tmp_file, char *path_obj) 
+static int copy_tmp_file_blob(unsigned char *header, char *path_tmp_file, char *path_obj) 
 {
-    FILE *tmp_file = fopen(path_tmp_file, "rb");
+    FILE *tmp_file = fopen(path_tmp_file, "wb");
     FILE *source = fopen(path_obj, "rb");
     if (tmp_file == NULL || source == NULL) {
         perror("Error when opening file in serialize blob.");
         return -1;
     }
-    int status = fwrite(header, 1, sizeof(header), tmp_file);
+    int status = fwrite(header, 1, strlen((char *)header) + 1, tmp_file);
     if (status == 0) {
         perror("Error when transfering header.");
         return -1;
@@ -221,74 +212,123 @@ int copy_tmp_file_blob(unsigned char *header, char *path_tmp_file, char *path_ob
     while (true) {
         if (status == 0)
             break;
-        status = fread(file_chunk, 1, sizeof(file_chunk), source);
+        status = fread(file_chunk, 1, CHUNK, source);
         if (fwrite(file_chunk, 1, status, tmp_file) != status) {
+            fclose(tmp_file);
+            fclose(source);
             perror("Error during the copy.");
             return -1;
         }
         total += status;
     }
+    fclose(tmp_file);
+    fclose(source);
     return total;
 }
 
 int serialize_blob(char *path_obj) 
 {
     char *cwd = NULL;
+    char *tmp = NULL;
+    char *repo = NULL;
+    char *path_tmp_file = NULL;
+    char *path_objects = NULL;
+    char *path_dir_sha = NULL;
+    char *path_blob_obj = NULL;
+
+    unsigned char *header = NULL;
+    unsigned char *sha_obj = NULL;
+    unsigned char *blob_obj = NULL;
+
+    FILE *tmp_blob_file = NULL;
+    FILE *source = NULL;
+    FILE *dest = NULL;
+
+    int retval = 0;
+
     if ((cwd = getcwd(NULL, 0)) == NULL) {
         perror("Could not find the current working dir.");
         return 1;
     }
-    char *repo = repo_find_f(cwd);
-    free(cwd);
+    tmp = repo_find_f(cwd);
+    repo = join_path_d(tmp, ".git");
 
-    struct stat st = {0};
-    unsigned char *sha_obj = get_sha_encryption_file_d(path_obj);
-    if (sha_obj == NULL) 
-        return 1;
-
-    unsigned char *header = get_header_blob(path_obj);
-    if (header == NULL) 
-        return 1;
-    
-    char *path_tmp_file = join_path_d(repo, "objects/tmp/tmp_blob_file");
-    int status = copy_tmp_file_blob(header, path_tmp_file, path_obj);
-    if (status == -1) {
-        free(sha_obj);
-        free(header);
-        free(path_tmp_file);
-        return 1;
+    path_tmp_file = join_path_d(repo, "objects/tmp/tmp_blob_file");
+    tmp_blob_file = fopen(path_tmp_file, "a");
+    if (tmp_blob_file == NULL) {
+        perror("Failed to create the tmp_blob_file.");
+        retval = 1;
+        goto clean;
     }
 
-    unsigned char current_obj_dir[3]; // first two character of the SHA1 digest plus the 0x00
+    header = get_header_blob_d(path_obj);
+    if (header == NULL) {
+        retval = 1;
+        goto clean;
+    }
+
+    int status = copy_tmp_file_blob(header, path_tmp_file, path_obj);
+    if (status == -1) {
+        retval = 1;
+        goto clean;
+    }
+
+    struct stat st = {0};
+    sha_obj = get_sha_encryption_file_d(path_obj);
+    if (sha_obj == NULL) {
+        retval = 1;
+        goto clean;
+    }
+
+    unsigned char current_obj_dir[3]; 
     memcpy(current_obj_dir, sha_obj, 2);
     current_obj_dir[2] = 0x00;
-    char *path_objects = join_path_d(repo, "objects/");
-    char *path_dir_sha = join_path_d(path_objects, current_obj_dir);
+    path_objects = join_path_d(repo, "objects/");
+    path_dir_sha = join_path_d(path_objects, (char *)current_obj_dir);
     if (stat(path_dir_sha, &st) != 0) 
         mkdir(path_dir_sha, PERMISSION);
     
-    unsigned char *blob_obj = sha_obj + 2;
-    char *path_blob_obj = join_path_d(path_dir_sha, (char *)blob_obj);
-    int read = write_compressed(path_blob_obj, path_tmp_file);
-    free(path_blob_obj);
+    blob_obj = sha_obj + 2;
+    path_blob_obj = join_path_d(path_dir_sha, (char *)blob_obj);
+
+    source = fopen(path_tmp_file, "rb");
+    dest = fopen(path_blob_obj, "wb");
+    if (source == NULL || dest == NULL) {
+        retval = 1;
+        goto clean;
+    }
+
+    int read = write_compressed(dest, source);
     if (read == 1) {
         perror("Error when compressing.");
-        free(sha_obj);
-        free(header);
-        free(path_tmp_file);
-        return 1;
+        retval = 1;
+        goto clean;
     }
 
     remove(path_tmp_file);
-    free(sha_obj);
-    free(header);
-    free(path_tmp_file);
+    retval = 0;
+    goto clean;
 
-    return 0;
+    clean:
+        if (tmp) free(tmp);
+        if (repo) free(repo);
+        if (path_tmp_file) free(path_tmp_file);
+        if (path_objects) free(path_objects);
+        if (path_dir_sha) free(path_dir_sha);
+        if (path_blob_obj) free(path_blob_obj);
+        if (header) free(header);
+        if (sha_obj) free(sha_obj);
+        if (blob_obj) free(blob_obj);
+
+        if (tmp_blob_file) fclose(tmp_blob_file);
+        if (source) fclose(source);
+        if (dest) fclose(dest);
+
+        return retval;
 }
 
 int main() {
-    char *path = "/home/marshallmallow/Folders/Personnal Project/Write yourself a git/Wyag/tests/test_one.c";
+    char *path = "/home/marshallmallow/Folders/Personnal Project/Write yourself a git/Wyag/tests/Makefile";
     serialize_blob(path);
 
     return 0;

@@ -1,49 +1,11 @@
-#include "../include/main.h"
-#include "../include/init.h"
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
-#include <sys/stat.h>
-
-
-char *join_path_d(char* parent, char* child) 
-{
-    char *result;
-    size_t len_parent = strlen(parent);
-    size_t len_child = strlen(child);
-    size_t total_len = len_child + len_parent + 1;
-    bool need_separator = false;
-
-    if (len_parent > 0 && parent[len_parent-1] != '/') {
-        need_separator = true;
-        total_len++;
-    }
-        
-    result = (char *)malloc(total_len);
-    if (!result) {
-        perror("Allocation error.");
-        return NULL;
-    }
-
-    char *current = result; 
-    memcpy(current, parent, len_parent);
-    current += len_parent;
-
-    if (need_separator == true) {
-        *current = '/';
-        current++;
-    }
-
-    memcpy(current, child, len_child + 1);
-    return result;
-
-
-    // Don't ever do dynamic allocation in a condition, it will 
-    // trigger a "Conditional jump or move depends on uninitialized values" 
-    // and boy that shit nasty.
-}
+#include "toolkit.c"
+// #include "../include/init.h"
+// #include <unistd.h>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <string.h>
+// #include <stdbool.h>
+// #include <sys/stat.h>
 
 void write_config(char *path, char *key, char **values, int len)
 {
